@@ -1377,15 +1377,21 @@ export class InteractionController {
     // floats outside the shape itself.
     if (!shape && this.arrowShapeId) {
       const prev = this.editor.store.get(this.arrowShapeId)
-      const reach = this.renderer.worldPx(14)
-      if (
-        prev &&
-        prev.type !== 'connector' &&
-        this.renderer.arrowHandlePositions(prev).some(
-          (h) => Math.hypot(w.x - h.world.x, w.y - h.world.y) <= reach,
-        )
-      ) {
-        shape = prev
+      if (prev && prev.type !== 'connector') {
+        // Keep the handles alive in a halo that extends WELL past the
+        // dots (which float 18px out): the pointer must travel beyond
+        // the circles before they disappear, so reaching a dot is never
+        // a race.
+        const halo = this.renderer.worldPx(44)
+        const b = boundsOf(prev, (id: ShapeId) => this.editor.store.get(id))
+        if (
+          w.x >= b.x - halo &&
+          w.x <= b.x + b.width + halo &&
+          w.y >= b.y - halo &&
+          w.y <= b.y + b.height + halo
+        ) {
+          shape = prev
+        }
       }
     }
 
