@@ -603,3 +603,19 @@ body,
   height: 34px;
   width: 260px;
 }
+
+/* Shape library picker */
+
+.tool.shape-chip {
+  width: auto;
+  padding: 0 7px;
+  gap: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.dd-menu.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 36px);
+  gap: 2px;
+}

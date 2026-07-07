@@ -9,6 +9,7 @@ import {
   Texture,
 } from 'pixi.js'
 import { Camera } from './camera'
+import { geoOutline, type GeoKind } from '../scene/geo'
 import {
   CANVAS_COLORS,
   effectiveTheme,
@@ -26,10 +27,9 @@ import {
   isResizable,
   type Bounds,
   type ConnectorShape,
-  type EllipseShape,
+  type GeoShape,
   type LineDash,
   type Point,
-  type RectShape,
   type Shape,
   type ShapeResolver,
   type StickyShape,
@@ -65,7 +65,7 @@ export class BoardRenderer {
    *  recomputed on every redraw so the dots track the live shape. */
   arrowHandles: { shapeId: string; active: Point | null } | null = null
   createPreview: {
-    type: 'sticky' | 'rect' | 'ellipse'
+    type: 'sticky' | GeoKind
     bounds: Bounds
     color: number
   } | null = null
@@ -350,13 +350,22 @@ export class BoardRenderer {
     if (this.createPreview) {
       const { type, bounds: b } = this.createPreview
       const color = themedColor(this.createPreview.color)
+      const alpha = type === 'sticky' ? 0.5 : 0.15
+      const outline =
+        type !== 'sticky' ? geoOutline(type, b.width, b.height) : null
       if (type === 'ellipse') {
         o.ellipse(b.x + b.width / 2, b.y + b.height / 2, b.width / 2, b.height / 2)
-          .fill({ color, alpha: 0.15 })
+          .fill({ color, alpha })
           .stroke({ color, width: 2 })
+      } else if (outline) {
+        o.moveTo(b.x + outline[0], b.y + outline[1])
+        for (let i = 2; i < outline.length; i += 2) {
+          o.lineTo(b.x + outline[i], b.y + outline[i + 1])
+        }
+        o.closePath().fill({ color, alpha }).stroke({ color, width: 2 })
       } else {
         o.rect(b.x, b.y, b.width, b.height)
-          .fill({ color, alpha: type === 'sticky' ? 0.5 : 0.15 })
+          .fill({ color, alpha })
           .stroke({ color, width: 2 })
       }
     }
@@ -493,7 +502,7 @@ function buildShape(
   node.addChild(g)
   if (shape.type !== 'connector') node.position.set(shape.x, shape.y)
 
-  const addLabel = (s: StickyShape | RectShape | EllipseShape) => {
+  const addLabel = (s: StickyShape | GeoShape) => {
     if (!s.text || s.id === editingId) return
     const alignH = s.textAlign ?? 'center'
     const alignV = s.textVAlign ?? 'middle'
@@ -533,8 +542,7 @@ function buildShape(
   const dash = shape.dash ?? 'solid'
 
   switch (shape.type) {
-    case 'sticky':
-    case 'rect': {
+    case 'sticky': {
       g.rect(0, 0, shape.width, shape.height).fill(fill)
       if (stroke.width > 0) {
         if (dash === 'solid') {
@@ -546,26 +554,8 @@ function buildShape(
       addLabel(shape)
       break
     }
-    case 'ellipse': {
-      g.ellipse(shape.width / 2, shape.height / 2, shape.width / 2, shape.height / 2)
-        .fill(fill)
-      if (stroke.width > 0) {
-        if (dash === 'solid') {
-          g.ellipse(
-            shape.width / 2,
-            shape.height / 2,
-            shape.width / 2,
-            shape.height / 2,
-          ).stroke(stroke)
-        } else {
-          strokeSubpaths(
-            g,
-            [ellipseOutline(shape.width, shape.height)],
-            stroke,
-            dash,
-          )
-        }
-      }
+    case 'geo': {
+      drawGeo(g, shape, fill, stroke, dash)
       addLabel(shape)
       break
     }
@@ -669,6 +659,95 @@ function strokeSubpaths(
 }
 
 /** Closed rectangle outline as a polyline (for dashed/dotted borders). */
+/** Render any shape-library kind: polygon kinds from their outline, plus
+ *  the specially-drawn rect / ellipse / cylinder. */
+function drawGeo(
+  g: Graphics,
+  shape: GeoShape,
+  fill: { color: number; alpha: number },
+  stroke: { color: number; alpha: number; width: number },
+  dash: LineDash,
+): void {
+  const w = shape.width
+  const h = shape.height
+  const strokePath = (path: Point[]) => {
+    if (stroke.width <= 0) return
+    if (dash === 'solid') {
+      g.moveTo(path[0].x, path[0].y)
+      for (let i = 1; i < path.length; i++) g.lineTo(path[i].x, path[i].y)
+      g.stroke(stroke)
+    } else {
+      strokeSubpaths(g, [path], stroke, dash)
+    }
+  }
+
+  if (shape.geo === 'rect') {
+    g.rect(0, 0, w, h).fill(fill)
+    strokePath(rectOutline(w, h))
+    return
+  }
+  if (shape.geo === 'ellipse') {
+    g.ellipse(w / 2, h / 2, w / 2, h / 2).fill(fill)
+    strokePath(ellipseOutline(w, h))
+    return
+  }
+  if (shape.geo === 'cylinder') {
+    const capH = Math.min(h * 0.18, w * 0.35)
+    // Fill: top cap ellipse + body + bottom cap ellipse.
+    g.ellipse(w / 2, h - capH / 2, w / 2, capH / 2)
+    g.rect(0, capH / 2, w, h - capH)
+    g.ellipse(w / 2, capH / 2, w / 2, capH / 2)
+    g.fill(fill)
+    if (stroke.width > 0) {
+      const top = ellipseCap(w, capH, 0)
+      const bottomHalf = ellipseCap(w, capH, h - capH, true)
+      const walls: Point[][] = [
+        [{ x: 0, y: capH / 2 }, { x: 0, y: h - capH / 2 }],
+        [{ x: w, y: capH / 2 }, { x: w, y: h - capH / 2 }],
+      ]
+      for (const p of [top, bottomHalf, ...walls]) {
+        if (dash === 'solid') {
+          g.moveTo(p[0].x, p[0].y)
+          for (let i = 1; i < p.length; i++) g.lineTo(p[i].x, p[i].y)
+          g.stroke(stroke)
+        } else {
+          strokeSubpaths(g, [p], stroke, dash)
+        }
+      }
+    }
+    return
+  }
+
+  const outline = geoOutline(shape.geo, w, h)
+  if (!outline) {
+    g.rect(0, 0, w, h).fill(fill)
+    strokePath(rectOutline(w, h))
+    return
+  }
+  const path: Point[] = []
+  for (let i = 0; i < outline.length; i += 2) {
+    path.push({ x: outline[i], y: outline[i + 1] })
+  }
+  g.poly(outline).fill(fill)
+  path.push(path[0]) // close the stroke
+  strokePath(path)
+}
+
+/** Full or lower-half ellipse outline for the cylinder caps. */
+function ellipseCap(w: number, capH: number, top: number, lowerHalf = false): Point[] {
+  const cx = w / 2
+  const cy = top + capH / 2
+  const steps = 32
+  const from = lowerHalf ? 0 : 0
+  const to = lowerHalf ? Math.PI : 2 * Math.PI
+  const out: Point[] = []
+  for (let i = 0; i <= steps; i++) {
+    const a = from + ((to - from) * i) / steps
+    out.push({ x: cx + (w / 2) * Math.cos(a), y: cy + (capH / 2) * Math.sin(a) })
+  }
+  return out
+}
+
 function rectOutline(w: number, h: number): Point[] {
   return [
     { x: 0, y: 0 },

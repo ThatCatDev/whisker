@@ -5,6 +5,8 @@
  * graph is plain data so the renderer and sync layer stay swappable.
  */
 
+import { geoOutline, pointInPolygon, type GeoKind } from './geo'
+
 export type ShapeId = string
 
 export type Tool =
@@ -12,8 +14,7 @@ export type Tool =
   | 'hand'
   | 'pen'
   | 'sticky'
-  | 'rect'
-  | 'ellipse'
+  | 'shape'
   | 'connector'
 
 export interface Point {
@@ -64,13 +65,11 @@ export interface StickyShape extends ShapeBase, Partial<TextStyleProps> {
   text: string
 }
 
-export interface RectShape extends ShapeBase, Partial<TextStyleProps> {
-  type: 'rect'
-  text: string
-}
-
-export interface EllipseShape extends ShapeBase, Partial<TextStyleProps> {
-  type: 'ellipse'
+/** Any shape from the shape library (rectangle, ellipse, triangle, star,
+ *  …). Legacy 'rect'/'ellipse' shapes normalize into this on read. */
+export interface GeoShape extends ShapeBase, Partial<TextStyleProps> {
+  type: 'geo'
+  geo: GeoKind
   text: string
 }
 
@@ -121,8 +120,7 @@ export interface ConnectorShape extends ShapeBase, Partial<ConnectorStyleProps> 
 
 export type Shape =
   | StickyShape
-  | RectShape
-  | EllipseShape
+  | GeoShape
   | DrawShape
   | ConnectorShape
   | ImageShape
@@ -130,16 +128,14 @@ export type Shape =
 export type ShapeResolver = (id: ShapeId) => Shape | undefined
 
 export const PALETTE = [
-  0xffffff, 0xfbbf24, 0xf87171, 0x34d399, 0x60a5fa, 0xa78bfa, 0xf472b6,
-  0x475569,
+  0xffffff, 0x000000, 0xfbbf24, 0xf87171, 0x34d399, 0x60a5fa, 0xa78bfa,
+  0xf472b6, 0x475569,
 ]
 
 export const MIN_SIZE = 16
 
-export function canHaveText(
-  s: Shape,
-): s is StickyShape | RectShape | EllipseShape {
-  return s.type === 'sticky' || s.type === 'rect' || s.type === 'ellipse'
+export function canHaveText(s: Shape): s is StickyShape | GeoShape {
+  return s.type === 'sticky' || s.type === 'geo'
 }
 
 export function isResizable(s: Shape): boolean {
@@ -158,7 +154,7 @@ export function anchorPoint(shape: Shape, towards: Point): Point {
   if (dx === 0 && dy === 0) return c
 
   let t: number
-  if (shape.type === 'ellipse') {
+  if (shape.type === 'geo' && shape.geo === 'ellipse') {
     const rx = shape.width / 2 || 1
     const ry = shape.height / 2 || 1
     t = 1 / Math.sqrt((dx / rx) ** 2 + (dy / ry) ** 2)
@@ -352,7 +348,6 @@ export function hitTest(
 ): boolean {
   switch (shape.type) {
     case 'sticky':
-    case 'rect':
     case 'image':
       return (
         p.x >= shape.x &&
@@ -360,11 +355,22 @@ export function hitTest(
         p.y >= shape.y &&
         p.y <= shape.y + shape.height
       )
-    case 'ellipse': {
-      const c = center(shape)
-      const rx = shape.width / 2 || 1
-      const ry = shape.height / 2 || 1
-      return ((p.x - c.x) / rx) ** 2 + ((p.y - c.y) / ry) ** 2 <= 1
+    case 'geo': {
+      const inBounds =
+        p.x >= shape.x &&
+        p.x <= shape.x + shape.width &&
+        p.y >= shape.y &&
+        p.y <= shape.y + shape.height
+      if (!inBounds) return false
+      if (shape.geo === 'ellipse') {
+        const c = center(shape)
+        const rx = shape.width / 2 || 1
+        const ry = shape.height / 2 || 1
+        return ((p.x - c.x) / rx) ** 2 + ((p.y - c.y) / ry) ** 2 <= 1
+      }
+      const outline = geoOutline(shape.geo, shape.width, shape.height)
+      if (!outline) return true // rect, cylinder: the box is the shape
+      return pointInPolygon(p.x - shape.x, p.y - shape.y, outline)
     }
     case 'draw': {
       const pts = denormalizedPoints(shape)

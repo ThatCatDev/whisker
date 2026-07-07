@@ -13,6 +13,7 @@ import {
   type TextStyleProps,
   type Tool,
 } from '../scene/types'
+import type { GeoKind } from '../scene/geo'
 
 export interface PenDefaults {
   width: number
@@ -33,12 +34,14 @@ export class Editor {
   tool: Tool = 'select'
   selection = new Set<ShapeId>()
   editingId: ShapeId | null = null
+  /** The shape-library kind the shape tool places; persisted. */
+  shapeKind: GeoKind = (localStorage.getItem('whisker-shape-kind') as GeoKind) || 'rect'
   /** Style for newly created shapes. Editable in Settings, also follows
    *  the last style edit; persisted across sessions. */
   styleDefaults: StyleProps = {
-    fillColor: 0xfbbf24,
-    fillOpacity: 0.15,
-    strokeColor: 0xfbbf24,
+    fillColor: 0xffffff,
+    fillOpacity: 1,
+    strokeColor: 0x000000,
     strokeOpacity: 1,
     strokeWidth: 2,
     dash: 'solid',
@@ -69,7 +72,9 @@ export class Editor {
     this.undoManager = new Y.UndoManager(store.shapes)
     store.subscribe(() => this.pruneSelection())
     try {
-      const saved = localStorage.getItem('whisker-style-defaults')
+      // v2: key bumped when the built-in default changed to white/black —
+      // older persisted defaults would silently shadow the new baseline.
+      const saved = localStorage.getItem('whisker-style-defaults-v2')
       if (saved) this.styleDefaults = { ...this.styleDefaults, ...JSON.parse(saved) }
       const savedText = localStorage.getItem('whisker-text-defaults')
       if (savedText) this.textDefaults = { ...this.textDefaults, ...JSON.parse(savedText) }
@@ -95,9 +100,15 @@ export class Editor {
   setStyleDefaults(patch: Partial<StyleProps>): void {
     this.styleDefaults = { ...this.styleDefaults, ...patch }
     localStorage.setItem(
-      'whisker-style-defaults',
+      'whisker-style-defaults-v2',
       JSON.stringify(this.styleDefaults),
     )
+    this.notify()
+  }
+
+  setShapeKind(kind: GeoKind): void {
+    this.shapeKind = kind
+    localStorage.setItem('whisker-shape-kind', kind)
     this.notify()
   }
 

@@ -64,8 +64,7 @@ the roadmap).
 | Zoom              | `Ctrl`+scroll, the bottom-right controls, `Ctrl+0` = 100%  |
 | Pen               | `P` — freehand drawing                                     |
 | Sticky note       | `S` — click to place (or drag to size); starts editing immediately |
-| Rectangle         | `R` — click to place, or drag to size in one motion        |
-| Ellipse           | `O` — click to place, or drag to size in one motion        |
+| Shapes            | toolbar picker with 18 shapes (rectangle, ellipse, triangle, diamond, star, arrows, speech bubble, cylinder, …); `R`/`O` jump to rectangle/ellipse; click to place or drag to size |
 | Arrow             | hover a shape and drag from one of the four edge dots — or `C` to drag between any two points; endpoints click into corner/edge/center anchors or pin anywhere |
 | Re-anchor         | select an arrow, drag either endpoint                      |
 | Edit text         | double-click a sticky/rect/ellipse; `Esc`/`Ctrl+Enter` done |

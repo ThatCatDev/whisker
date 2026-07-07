@@ -2,6 +2,7 @@ import type { BoardRenderer, HandleId } from './renderer'
 import type { Editor } from '../editor/Editor'
 import { newShapeId } from '../collab/store'
 import { recognizeStroke, type RecognizedStroke } from '../scene/recognize'
+import { geoDefaultSize, type GeoKind } from '../scene/geo'
 import { deserializeBoard } from '../scene/serialize'
 import {
   ANCHOR_POSITIONS,
@@ -57,7 +58,7 @@ type Session =
        *  the pen instead of leaving an invisible dot. */
       tapSelects?: boolean
     }
-  | { kind: 'create'; type: 'sticky' | 'rect' | 'ellipse'; startW: Point }
+  | { kind: 'create'; type: 'sticky' | GeoKind; startW: Point }
   | { kind: 'pinch'; lastMid: Point; lastDist: number }
   | {
       kind: 'connect'
@@ -84,8 +85,6 @@ const TOOL_KEYS: Record<string, Tool> = {
   h: 'hand',
   p: 'pen',
   s: 'sticky',
-  r: 'rect',
-  o: 'ellipse',
   c: 'connector',
 }
 
@@ -450,11 +449,16 @@ export class InteractionController {
         break
       }
       case 'sticky':
-      case 'rect':
-      case 'ellipse':
         // Creation happens on pointerup: a plain click places the default
         // size, a drag sizes the shape in one motion.
-        this.session = { kind: 'create', type: this.editor.tool, startW: w }
+        this.session = { kind: 'create', type: 'sticky', startW: w }
+        break
+      case 'shape':
+        this.session = {
+          kind: 'create',
+          type: this.editor.shapeKind,
+          startW: w,
+        }
         break
     }
     this.editor.setSessionActive(this.session.kind !== 'none')
@@ -623,23 +627,19 @@ export class InteractionController {
     this.session = { kind: 'marquee', startW: w, additive: shift }
   }
 
-  private static DEFAULT_SIZES = {
-    sticky: { width: 200, height: 200 },
-    rect: { width: 240, height: 160 },
-    ellipse: { width: 200, height: 140 },
-  } as const
+  private defaultSizeFor(type: 'sticky' | GeoKind): { width: number; height: number } {
+    return type === 'sticky' ? { width: 200, height: 200 } : geoDefaultSize(type)
+  }
 
   /** Runs on pointerup, so opening the sticky text editor is safe (no
    *  later mousedown default action can blur the fresh textarea). */
-  private createShape(
-    type: 'sticky' | 'rect' | 'ellipse',
-    bounds: Bounds,
-  ): void {
+  private createShape(type: 'sticky' | GeoKind, bounds: Bounds): void {
     const id = newShapeId()
     const sticky = type === 'sticky'
     this.editor.store.add({
       id,
-      type,
+      type: sticky ? 'sticky' : 'geo',
+      ...(sticky ? null : { geo: type }),
       x: bounds.x,
       y: bounds.y,
       width: bounds.width,
@@ -651,6 +651,7 @@ export class InteractionController {
       ...(sticky
         ? {
             fillOpacity: 1,
+            fillColor: 0xfbbf24,
             strokeColor: 0x000000,
             strokeOpacity: 0.08,
             strokeWidth: 1,
@@ -658,7 +659,7 @@ export class InteractionController {
         : null),
       text: '',
       ...this.editor.textDefaults,
-    } as Shape)
+    } as unknown as Shape)
     this.editor.select([id])
     this.editor.setTool('select')
     if (sticky) this.editor.beginTextEdit(id)
@@ -983,6 +984,14 @@ export class InteractionController {
       case 'marquee': {
         const rect = boundsFromPoints(session.startW, w)
         this.renderer.marquee = null
+        // A click (degenerate marquee) on empty canvas must not select
+        // shapes whose bounding box happens to contain the point — e.g.
+        // the empty corner of a hexagon's bounds.
+        const tol = this.renderer.worldPx(3)
+        if (rect.width < tol && rect.height < tol) {
+          this.renderer.redrawOverlay()
+          return
+        }
         const get = (id: ShapeId) => this.editor.store.get(id)
         const ids = this.editor.store
           .getAll()
@@ -1042,7 +1051,7 @@ export class InteractionController {
           b.height = Math.max(MIN_SIZE, b.height)
           this.createShape(session.type, b)
         } else {
-          const size = InteractionController.DEFAULT_SIZES[session.type]
+          const size = this.defaultSizeFor(session.type)
           this.createShape(session.type, {
             x: w.x - size.width / 2,
             y: w.y - size.height / 2,
@@ -1266,7 +1275,8 @@ export class InteractionController {
         sd.fillOpacity < 0.05 && (sd.strokeWidth === 0 || sd.strokeOpacity < 0.05)
       this.editor.store.add({
         id,
-        type: rec.kind,
+        type: 'geo',
+        geo: rec.kind,
         x: rec.bounds.x,
         y: rec.bounds.y,
         width: rec.bounds.width,
@@ -1534,6 +1544,17 @@ export class InteractionController {
     }
     if (e.key === 'Escape') {
       this.editor.clearSelection()
+      return
+    }
+    // r / o jump straight to the two most-used library shapes.
+    if (e.key.toLowerCase() === 'r') {
+      this.editor.setShapeKind('rect')
+      this.editor.setTool('shape')
+      return
+    }
+    if (e.key.toLowerCase() === 'o') {
+      this.editor.setShapeKind('ellipse')
+      this.editor.setTool('shape')
       return
     }
     const tool = TOOL_KEYS[e.key.toLowerCase()]

@@ -12,6 +12,8 @@ const VERSION = 1
 
 const SHAPE_TYPES = new Set([
   'sticky',
+  'geo',
+  // legacy .whisker files, normalized on read:
   'rect',
   'ellipse',
   'draw',

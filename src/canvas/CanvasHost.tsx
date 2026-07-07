@@ -3,8 +3,7 @@ import { BoardRenderer } from './renderer'
 import { InteractionController } from './interactions'
 import {
   canHaveText,
-  type EllipseShape,
-  type RectShape,
+  type GeoShape,
   type StickyShape,
 } from '../scene/types'
 import { labelColor } from '../ui/theme'
@@ -24,7 +23,7 @@ function TextEditorOverlay({
   pos,
   onCommit,
 }: {
-  shape: StickyShape | RectShape | EllipseShape
+  shape: StickyShape | GeoShape
   zoom: number
   pos: { x: number; y: number }
   onCommit: (text: string) => void

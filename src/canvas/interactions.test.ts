@@ -355,9 +355,10 @@ describe('pen stroke debounce-merge', () => {
   it('new boxes pick up the default border style', () => {
     const h = makeHarness()
     h.editor.setStyleDefaults({ dash: 'dotted' })
-    h.editor.setTool('rect')
+    h.editor.setShapeKind('rect')
+    h.editor.setTool('shape')
     h.drag({ x: 300, y: 300 }, { x: 420, y: 380 })
-    const r = h.store.getAll().find((s) => s.type === 'rect')!
+    const r = h.store.getAll().find((s) => s.type === 'geo')!
     expect(r.dash).toBe('dotted')
   })
 
@@ -430,7 +431,8 @@ describe('dragging a small selected shape (move vs resize)', () => {
     const h = makeHarness()
     h.store.add({
       id: 'r1',
-      type: 'rect',
+      type: 'geo',
+      geo: 'rect',
       x: 300,
       y: 300,
       width: 240,
@@ -656,8 +658,8 @@ describe('deleteSelection (backs the popup trash button)', () => {
       textAlign: 'center',
       textVAlign: 'middle',
     }
-    h.store.add({ id: 'a', type: 'rect', x: 0, y: 0, width: 100, height: 100, ...base } as Shape)
-    h.store.add({ id: 'b', type: 'rect', x: 300, y: 0, width: 100, height: 100, ...base } as Shape)
+    h.store.add({ id: 'a', type: 'geo', geo: 'rect', x: 0, y: 0, width: 100, height: 100, ...base } as Shape)
+    h.store.add({ id: 'b', type: 'geo', geo: 'rect', x: 300, y: 0, width: 100, height: 100, ...base } as Shape)
     h.store.add({
       id: 'c',
       type: 'connector',

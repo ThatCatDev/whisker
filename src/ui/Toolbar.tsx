@@ -1,5 +1,6 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { Dropdown } from './Dropdown'
+import { GeoIcon } from './GeoIcon'
 import { Icon, type IconName } from './Icons'
 import { NumberField } from './NumberField'
 import {
@@ -10,6 +11,7 @@ import {
   type ThemePreference,
 } from './theme'
 import { PALETTE, type LineDash, type Tool } from '../scene/types'
+import { GEO_KINDS } from '../scene/geo'
 import { deserializeBoard, serializeBoard } from '../scene/serialize'
 import {
   downloadBlob,
@@ -38,8 +40,9 @@ const TOOLS: { id: Tool; label: string; icon: IconName }[] = [
   { id: 'hand', label: 'Pan — H (or hold Space)', icon: 'hand' },
   { id: 'pen', label: 'Pen — P', icon: 'pen' },
   { id: 'sticky', label: 'Sticky note — S', icon: 'sticky' },
-  { id: 'rect', label: 'Rectangle — R', icon: 'rect' },
-  { id: 'ellipse', label: 'Ellipse — O', icon: 'ellipse' },
+]
+
+const TOOLS_AFTER_SHAPE: { id: Tool; label: string; icon: IconName }[] = [
   { id: 'connector', label: 'Arrow: drag between shapes — C', icon: 'connector' },
 ]
 
@@ -56,6 +59,8 @@ export function Toolbar({
   useEffect(() => editor.subscribe(force), [editor])
   useEffect(() => subscribeTheme(force), [])
   const importInput = useRef<HTMLInputElement>(null)
+  const [shapesOpen, setShapesOpen] = useState(false)
+  const currentShape = GEO_KINDS.find((g) => g.kind === editor.shapeKind) ?? GEO_KINDS[0]
 
   const hasSelection = editor.selection.size > 0
   const themePref = getPreference()
@@ -98,6 +103,50 @@ export function Toolbar({
         🐈
       </button>
       {TOOLS.map((t) => (
+        <button
+          key={t.id}
+          className={editor.tool === t.id ? 'tool active' : 'tool'}
+          title={t.label}
+          onClick={() => editor.setTool(t.id)}
+        >
+          <Icon name={t.icon} />
+        </button>
+      ))}
+      <div className="dd">
+        <button
+          className={editor.tool === 'shape' ? 'tool active shape-chip' : 'tool shape-chip'}
+          title={`Shapes — R (current: ${currentShape.label})`}
+          onClick={() => {
+            editor.setTool('shape')
+            setShapesOpen(!shapesOpen)
+          }}
+        >
+          <GeoIcon kind={editor.shapeKind} />
+          <span className="caret">▾</span>
+        </button>
+        {shapesOpen && (
+          <>
+            <div className="dd-backdrop" onClick={() => setShapesOpen(false)} />
+            <div className="dd-menu shape-grid">
+              {GEO_KINDS.map(({ kind, label }) => (
+                <button
+                  key={kind}
+                  className={editor.shapeKind === kind ? 'popup-btn active' : 'popup-btn'}
+                  title={label}
+                  onClick={() => {
+                    editor.setShapeKind(kind)
+                    editor.setTool('shape')
+                    setShapesOpen(false)
+                  }}
+                >
+                  <GeoIcon kind={kind} />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      {TOOLS_AFTER_SHAPE.map((t) => (
         <button
           key={t.id}
           className={editor.tool === t.id ? 'tool active' : 'tool'}

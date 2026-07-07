@@ -7,27 +7,37 @@ import type { Shape, ShapeId } from '../scene/types'
  *  fillColor changed) still resolves every field. */
 function normalizeShape(raw: Record<string, unknown>): Shape {
   const s = raw as Record<string, unknown> & Shape
+  // Boards written before the shape library stored rectangles and
+  // ellipses as their own types; they are geo kinds now. The stored
+  // type field is left untouched — reads normalize, patches never
+  // rewrite it.
+  if ((s.type as string) === 'rect' || (s.type as string) === 'ellipse') {
+    ;(s as Record<string, unknown>).geo = s.type
+    ;(s as Record<string, unknown>).type = 'geo'
+  }
   const legacy = (raw.color as number) ?? 0xfbbf24
   const defaults: Record<string, [number, number, number, number, number]> = {
     // [fillColor, fillOpacity, strokeColor, strokeOpacity, strokeWidth]
     sticky: [legacy, 1, 0x000000, 0.08, 1],
-    rect: [legacy, 0.15, legacy, 1, 2],
-    ellipse: [legacy, 0.15, legacy, 1, 2],
+    geo: [legacy, 0.15, legacy, 1, 2],
     draw: [legacy, 0, legacy, 1, 4],
     connector: [legacy, 0, legacy, 1, 3],
     image: [0xffffff, 0, 0x475569, 1, 0],
   }
-  const d = defaults[s.type] ?? defaults.rect
+  const d = defaults[s.type] ?? defaults.geo
   s.fillColor ??= d[0]
   s.fillOpacity ??= d[1]
   s.strokeColor ??= d[2]
   s.strokeOpacity ??= d[3]
   s.strokeWidth ??= d[4]
-  if (s.type === 'sticky' || s.type === 'rect' || s.type === 'ellipse') {
+  if (s.type === 'sticky' || s.type === 'geo') {
     s.fontSize ??= 16
     s.bold ??= false
     s.textAlign ??= 'center'
     s.textVAlign ??= 'middle'
+  }
+  if (s.type === 'geo') {
+    ;(s as { geo?: string }).geo ??= 'rect'
   }
   if (s.type === 'connector') {
     s.route ??= 'straight'
