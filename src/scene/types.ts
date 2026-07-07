@@ -235,37 +235,124 @@ export function anchorAt(
   }
 }
 
+type Side = 'n' | 'e' | 's' | 'w'
+const SIDE_ANCHOR: Record<Side, Point> = {
+  n: { x: 0.5, y: 0 },
+  e: { x: 1, y: 0.5 },
+  s: { x: 0.5, y: 1 },
+  w: { x: 0, y: 0.5 },
+}
+const SIDE_NORMAL: Record<Side, Point> = {
+  n: { x: 0, y: -1 },
+  e: { x: 1, y: 0 },
+  s: { x: 0, y: 1 },
+  w: { x: -1, y: 0 },
+}
+
+function rotateVec(v: Point, angle: number): Point {
+  if (!angle) return v
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos }
+}
+
+function normalize(v: Point): Point {
+  const len = Math.hypot(v.x, v.y) || 1
+  return { x: v.x / len, y: v.y / len }
+}
+
+/** Floating attachment: exit from the midpoint of whichever side faces
+ *  `towards`. A stable contact point keeps arrows calm while shapes are
+ *  dragged around — no sliding along the perimeter. */
+function floatingAttach(
+  shape: Shape,
+  towards: Point,
+): { point: Point; normal: Point } {
+  const c = center(shape)
+  const rot = shape.rotation ?? 0
+  const local = rotatePoint(towards, c, -rot)
+  const rx = (local.x - c.x) / (shape.width / 2 || 1)
+  const ry = (local.y - c.y) / (shape.height / 2 || 1)
+  const side: Side =
+    Math.abs(rx) >= Math.abs(ry) ? (rx > 0 ? 'e' : 'w') : (ry > 0 ? 's' : 'n')
+  return {
+    point: pointOnShape(shape, SIDE_ANCHOR[side]),
+    normal: rotateVec(SIDE_NORMAL[side], rot),
+  }
+}
+
+/** Outward direction at a pinned anchor (used as the curve tangent). */
+function pinnedNormal(shape: Shape, anchor: Point): Point {
+  const v = { x: anchor.x - 0.5, y: anchor.y - 0.5 }
+  const len = Math.hypot(v.x, v.y)
+  const n = len < 1e-6 ? { x: 0, y: -1 } : { x: v.x / len, y: v.y / len }
+  return rotateVec(n, shape.rotation ?? 0)
+}
+
+/** Endpoints plus outward tangents for both ends of a connector. */
+export function connectorGeometry(
+  c: ConnectorShape,
+  get: ShapeResolver,
+): { a: Point; b: Point; ta: Point; tb: Point } {
+  const startShape = c.startId ? get(c.startId) : undefined
+  const endShape = c.endId ? get(c.endId) : undefined
+  const towardsB = endShape
+    ? center(endShape)
+    : (c.endPoint ?? { x: c.x, y: c.y })
+  const towardsA = startShape
+    ? center(startShape)
+    : (c.startPoint ?? { x: c.x, y: c.y })
+
+  let a: Point
+  let ta: Point | null = null
+  if (startShape && !isCenterAnchor(c.startAnchor)) {
+    a = pointOnShape(startShape, c.startAnchor!)
+    ta = pinnedNormal(startShape, c.startAnchor!)
+  } else if (startShape) {
+    const f = floatingAttach(startShape, towardsB)
+    a = f.point
+    ta = f.normal
+  } else {
+    a = c.startPoint ?? { x: c.x, y: c.y }
+  }
+
+  let b: Point
+  let tb: Point | null = null
+  if (endShape && !isCenterAnchor(c.endAnchor)) {
+    b = pointOnShape(endShape, c.endAnchor!)
+    tb = pinnedNormal(endShape, c.endAnchor!)
+  } else if (endShape) {
+    const f = floatingAttach(endShape, towardsA)
+    b = f.point
+    tb = f.normal
+  } else {
+    b = c.endPoint ?? a
+  }
+
+  // Free endpoints aim along the direct line.
+  ta ??= normalize({ x: b.x - a.x, y: b.y - a.y })
+  tb ??= normalize({ x: a.x - b.x, y: a.y - b.y })
+  return { a, b, ta, tb }
+}
+
 export function connectorEndpoints(
   c: ConnectorShape,
   get: ShapeResolver,
 ): { a: Point; b: Point } {
-  const startShape = c.startId ? get(c.startId) : undefined
-  const endShape = c.endId ? get(c.endId) : undefined
-  const fixedA =
-    startShape && !isCenterAnchor(c.startAnchor)
-      ? pointOnShape(startShape, c.startAnchor!)
-      : null
-  const fixedB =
-    endShape && !isCenterAnchor(c.endAnchor)
-      ? pointOnShape(endShape, c.endAnchor!)
-      : null
-  const rawA =
-    fixedA ?? (startShape ? center(startShape) : (c.startPoint ?? { x: c.x, y: c.y }))
-  const rawB = fixedB ?? (endShape ? center(endShape) : (c.endPoint ?? rawA))
-  return {
-    a: fixedA ?? (startShape ? anchorPoint(startShape, rawB) : rawA),
-    b: fixedB ?? (endShape ? anchorPoint(endShape, rawA) : rawB),
-  }
+  const g = connectorGeometry(c, get)
+  return { a: g.a, b: g.b }
 }
 
 /** The polyline a connector is drawn (and hit-tested) along. Straight is
  *  two points; elbow inserts orthogonal bends; curve samples a quadratic. */
 export function connectorPath(c: ConnectorShape, get: ShapeResolver): Point[] {
-  const { a, b } = connectorEndpoints(c, get)
+  const { a, b, ta, tb } = connectorGeometry(c, get)
   const route = c.route ?? 'straight'
   if (route === 'elbow') {
     if (Math.abs(a.x - b.x) < 1 || Math.abs(a.y - b.y) < 1) return [a, b]
-    if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+    // First leg follows the exit direction of the start attachment.
+    const horizontalFirst = Math.abs(ta.x) >= Math.abs(ta.y)
+    if (horizontalFirst) {
       const mx = (a.x + b.x) / 2
       return [a, { x: mx, y: a.y }, { x: mx, y: b.y }, b]
     }
@@ -275,19 +362,26 @@ export function connectorPath(c: ConnectorShape, get: ShapeResolver): Point[] {
   if (route === 'curve') {
     const len = Math.hypot(b.x - a.x, b.y - a.y)
     if (len < 2) return [a, b]
-    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-    const px = -(b.y - a.y) / len
-    const py = (b.x - a.x) / len
-    const off = Math.min(60, len * 0.2)
-    const cp = { x: mid.x + px * off, y: mid.y + py * off }
+    const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len }
+    // How much each end must turn away from the direct line (0 = aligned).
+    const misA = (1 - (ta.x * d.x + ta.y * d.y)) / 2
+    const misB = (1 - (tb.x * -d.x + tb.y * -d.y)) / 2
+    // Straight already looks right — asking for "curvy" shouldn't bend a
+    // line that has no reason to bend.
+    if (Math.max(misA, misB) < 0.02) return [a, b]
+    const reach = Math.min(len * 0.5, 180)
+    const ha = reach * (0.2 + 0.8 * misA)
+    const hb = reach * (0.2 + 0.8 * misB)
+    const p1 = { x: a.x + ta.x * ha, y: a.y + ta.y * ha }
+    const p2 = { x: b.x + tb.x * hb, y: b.y + tb.y * hb }
     const pts: Point[] = []
-    const STEPS = 24
+    const STEPS = 32
     for (let i = 0; i <= STEPS; i++) {
       const t = i / STEPS
       const mt = 1 - t
       pts.push({
-        x: mt * mt * a.x + 2 * mt * t * cp.x + t * t * b.x,
-        y: mt * mt * a.y + 2 * mt * t * cp.y + t * t * b.y,
+        x: mt ** 3 * a.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t ** 3 * b.x,
+        y: mt ** 3 * a.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t ** 3 * b.y,
       })
     }
     return pts
