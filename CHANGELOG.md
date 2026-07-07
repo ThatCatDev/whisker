@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/ThatCatDev/whisker/compare/v1.7.0...v1.7.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* stop old builds from silently dropping imported shapes ([f348249](https://github.com/ThatCatDev/whisker/commit/f34824957a62d23eeab68874f9e2c3e64a24def0))
+
 # [1.7.0](https://github.com/ThatCatDev/whisker/compare/v1.6.0...v1.7.0) (2026-07-07)
 
 
